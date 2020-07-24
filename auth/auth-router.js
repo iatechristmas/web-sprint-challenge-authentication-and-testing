@@ -1,7 +1,7 @@
 const bcryptjs = require("bcryptjs");
 const router = require("express").Router();
 const Users = require("./auth-model");
-const jwt = require("jsonwebtoken");
+
 const restricted = require("./authenticate-middleware");
 
 router.get("/", restricted, (req, res) => {
@@ -15,11 +15,10 @@ router.get("/", restricted, (req, res) => {
 });
 
 router.post("/register", (req, res) => {
-  const user = req.body;
   const rounds = process.env.BCRYPT_ROUNDS || 4;
-  const hash = bcryptjs.hashSync(user.password, rounds);
-  user.password = hash;
-  Users.register(user)
+  const hash = bcryptjs.hashSync(req.body.password, rounds);
+  req.body.password = hash;
+  Users.register(req.body)
     .then((response) => {
       res.status(201).json(response);
     })
@@ -30,27 +29,29 @@ router.post("/register", (req, res) => {
 
 router.post("/login", (req, res) => {
   const { username, password } = req.body;
-  Users.findByUser({ username: username }).then(([response]) => {
-    if (response && bcryptjs.compareSync(password, response.password)) {
-      const token = createToken(response);
-      res.status(200).json({ message: "Welcome to our API", token });
-    } else {
-      res.status(401).json({ message: "Invalid credentials" });
-    }
-  });
+  Users.findByUser({ username })
+    .then((users) => {
+      const user = users[0];
+      if (user && bcryptjs.compareSync(password, user.password)) {
+        req.session.loggedIn = true;
+        req.session.username = user.username;
+        res.status(200).json({ message: "welcome" });
+      } else {
+        res.status(401).json({ message: "invalid credentials" });
+      }
+    })
+    .catch((error) => {
+      res.status(500).json({ error: error.message });
+    });
 });
 
-function createToken(user) {
-  const payload = {
-    sub: user.id,
-    username: user.username,
-    password: user.password,
-  };
-  const secret = process.env.JWT_SECRET || "goonies never say die";
-  const options = {
-    expiresIn: "1d",
-  };
-  return jwt.sign(payload, secret, options);
-}
+router.get("/logout", (req, res) => {
+  if (req.session) {
+    req.session.destroy();
+    res.status(204).end();
+  } else {
+    res.status(200).json({ message: "already logged out" });
+  }
+});
 
 module.exports = router;
